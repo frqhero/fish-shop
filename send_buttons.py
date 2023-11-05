@@ -1,26 +1,37 @@
 import os
+from urllib.parse import urljoin
 
 import requests
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQueryHandler
+from telegram.ext import (
+    Updater,
+    CommandHandler,
+    CallbackContext,
+    CallbackQueryHandler,
+)
 
 
 def start(update: Update, context: CallbackContext) -> None:
     """Sends a message with three inline buttons attached."""
     # response = requests.get(url, headers=headers)
 
+    url = context.dispatcher.request_data['url']
+    url = urljoin(url, '/api/')
+    url = urljoin(url, '/product/')
+
     data = requests.get(
-        context.dispatcher.request_data['url'],
+        url,
         headers=context.dispatcher.request_data['headers'],
     ).json()['data']
 
     keyboard = [
         [
-            InlineKeyboardButton("Option 1", callback_data='1'),
-            InlineKeyboardButton("Option 2", callback_data='2'),
-        ],
-        [InlineKeyboardButton("Option 3", callback_data='3')],
+            InlineKeyboardButton(
+                product['attributes']['title'], callback_data=product['id']
+            )
+        ]
+        for product in data
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -36,7 +47,7 @@ def button(update: Update, context: CallbackContext) -> None:
     # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
     query.answer()
 
-    query.edit_message_text(text=f"Selected option: {query.data}")
+    query.edit_message_text(text=f'Selected option: {query.data}')
 
 
 def main():
@@ -44,12 +55,10 @@ def main():
 
     request_data = {}
     strapi_token = os.getenv('STRAPI_TOKEN')
-    request_data['url'] = 'http://localhost:1337/api/products'
-    request_data['headers'] = {
-        'Authorization': f'Bearer {strapi_token}'
-    }
+    request_data['host'] = 'http://localhost:1337'
+    request_data['headers'] = {'Authorization': f'Bearer {strapi_token}'}
 
-    token = os.getenv("TELEGRAM_TOKEN")
+    token = os.getenv('TELEGRAM_TOKEN')
     updater = Updater(token)
     dispatcher = updater.dispatcher
     dispatcher.request_data = request_data

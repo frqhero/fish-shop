@@ -1,9 +1,13 @@
 import os
 import logging
-import redis
-from dotenv import load_dotenv
+from urllib.parse import urljoin
 
-from telegram.ext import Filters, Updater
+import redis
+import requests
+from dotenv import load_dotenv
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+
+from telegram.ext import Filters, Updater, CallbackContext
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 
 _database = None
@@ -16,8 +20,61 @@ def start(update, context):
     Бот отвечает пользователю фразой "Привет!" и переводит его в состояние ECHO.
     Теперь в ответ на его команды будет запускаеться хэндлер echo.
     """
-    update.message.reply_text(text='Привет!')
-    return "ECHO"
+    url = context.dispatcher.request_data['host']
+    url = urljoin(url, '/api/')
+    url = urljoin(url, 'products/')
+
+    data = requests.get(
+        url,
+        headers=context.dispatcher.request_data['headers'],
+    ).json()['data']
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                product['attributes']['title'], callback_data=product['id']
+            )
+        ]
+        for product in data
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    update.message.reply_text('Please choose:', reply_markup=reply_markup)
+    return 'HANDLE_MENU'
+
+
+def handle_menu(update: Update, context: CallbackContext):
+    update.callback_query.answer()
+
+    user_reply = update.callback_query.data
+
+    host_url = context.dispatcher.request_data['host']
+    headers = context.dispatcher.request_data['headers']
+
+    detail_url = urljoin(host_url, '/api/')
+    detail_url = urljoin(detail_url, 'products/')
+    detail_url = urljoin(detail_url, user_reply)
+
+    params = {'populate': 'picture'}
+    data = requests.get(
+        detail_url,
+        headers=headers,
+        params=params,
+    ).json()['data']
+
+    picture_url = data['attributes']['picture']['data']['attributes']['url']
+    picture_url = urljoin(host_url, picture_url)
+
+    content = requests.get(picture_url, headers=headers).content
+
+    update.callback_query.message.reply_photo(
+        content,
+        data['attributes']['description']
+    )
+    update.callback_query.message.delete()
+
+    return 'START'
 
 
 def echo(update, context):
@@ -29,7 +86,7 @@ def echo(update, context):
     """
     users_reply = update.message.text
     update.message.reply_text(users_reply)
-    return "ECHO"
+    return 'ECHO'
 
 
 def handle_users_reply(update, context):
@@ -57,11 +114,12 @@ def handle_users_reply(update, context):
     if user_reply == '/start':
         user_state = 'START'
     else:
-        user_state = db.get(chat_id).decode("utf-8")
+        user_state = db.get(chat_id).decode('utf-8')
 
     states_functions = {
         'START': start,
-        'ECHO': echo
+        'ECHO': echo,
+        'HANDLE_MENU': handle_menu,
     }
     state_handler = states_functions[user_state]
     # Если вы вдруг не заметите, что python-telegram-bot перехватывает ошибки.
@@ -80,18 +138,27 @@ def get_database_connection():
     """
     global _database
     if _database is None:
-        database_password = os.getenv("DATABASE_PASSWORD")
-        database_host = os.getenv("DATABASE_HOST")
-        database_port = os.getenv("DATABASE_PORT")
-        _database = redis.Redis(host=database_host, port=database_port, password=database_password)
+        database_password = os.getenv('DATABASE_PASSWORD')
+        database_host = os.getenv('DATABASE_HOST')
+        database_port = os.getenv('DATABASE_PORT')
+        _database = redis.Redis(
+            host=database_host, port=database_port, password=database_password
+        )
     return _database
 
 
 if __name__ == '__main__':
     load_dotenv()
-    token = os.getenv("TELEGRAM_TOKEN")
+
+    request_data = {}
+    strapi_token = os.getenv('STRAPI_TOKEN')
+    request_data['host'] = 'http://localhost:1337'
+    request_data['headers'] = {'Authorization': f'Bearer {strapi_token}'}
+
+    token = os.getenv('TELEGRAM_TOKEN')
     updater = Updater(token)
     dispatcher = updater.dispatcher
+    dispatcher.request_data = request_data
     dispatcher.add_handler(CallbackQueryHandler(handle_users_reply))
     dispatcher.add_handler(MessageHandler(Filters.text, handle_users_reply))
     dispatcher.add_handler(CommandHandler('start', handle_users_reply))
