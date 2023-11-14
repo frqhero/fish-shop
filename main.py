@@ -75,7 +75,8 @@ def handle_menu(update: Update, context: CallbackContext):
     content = requests.get(picture_url, headers=headers).content
 
     keyboard = [
-        [InlineKeyboardButton('Назад', callback_data='Back')]
+        [InlineKeyboardButton('Добавить в корзину', callback_data='AddToCard')],
+        [InlineKeyboardButton('Назад', callback_data='Back')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
